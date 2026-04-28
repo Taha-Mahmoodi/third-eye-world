@@ -1,7 +1,8 @@
-// /api/memos routes — Phase 1 tasks 3 + 4.
+// /api/memos routes — Phase 1 tasks 3, 4, 5.
 //
 // POST  /api/memos                — multipart audio upload
 // GET   /api/memos?cursor=&limit= — newest-first feed with keyset pagination
+// GET   /api/memos/:id/audio      — stream the audio bytes for one memo
 //
 // The user_id on POST is the Phase-1 hardcoded demo user (see
 // lib/demo-user.ts). Phase 6 swaps that for req.session.userId.
@@ -15,6 +16,8 @@
 
 import type { FastifyInstance, FastifyPluginAsync } from 'fastify';
 import { randomUUID } from 'node:crypto';
+import { createReadStream } from 'node:fs';
+import { stat } from 'node:fs/promises';
 import { z } from 'zod';
 import type { DB } from '../db/client.js';
 import {
@@ -251,6 +254,60 @@ export const memosRoutes = (options: MemosRoutesOptions): FastifyPluginAsync =>
 
       return reply.send({ memos, next_cursor: nextCursor });
     });
+
+    app.get<{ Params: { id: string } }>(
+      '/api/memos/:id/audio',
+      async (request, reply) => {
+        const { id } = request.params;
+
+        const memo = options.db
+          .prepare<[string], { audio_path: string; mime_type: string }>(
+            'SELECT audio_path, mime_type FROM memos WHERE id = ?',
+          )
+          .get(id);
+
+        if (!memo) {
+          return reply.code(404).send({
+            error: 'memo_not_found',
+            message: 'No memo with that id.',
+          });
+        }
+
+        // resolveAbsolute throws on path traversal — the value comes from the
+        // DB, but the audio-store guardrail is defense-in-depth.
+        let absolutePath: string;
+        try {
+          absolutePath = options.audioStore.resolveAbsolute(memo.audio_path);
+        } catch {
+          request.log.error({ memoId: id }, 'audio path traversal blocked');
+          return reply.code(404).send({
+            error: 'memo_not_found',
+            message: 'No memo with that id.',
+          });
+        }
+
+        let stats;
+        try {
+          stats = await stat(absolutePath);
+        } catch {
+          // DB row exists but file is missing — log and 404.
+          request.log.error({ memoId: id, audio_path: memo.audio_path }, 'audio file missing on disk');
+          return reply.code(404).send({
+            error: 'audio_missing',
+            message: 'Audio file is no longer available.',
+          });
+        }
+
+        // Audio is immutable (§ 16: "Audio files are immutable. No edit
+        // endpoints. Delete-and-repost only."). Long cache + immutable hint
+        // is safe and saves repeated transfers.
+        return reply
+          .type(memo.mime_type)
+          .header('Cache-Control', 'public, max-age=31536000, immutable')
+          .header('Content-Length', String(stats.size))
+          .send(createReadStream(absolutePath));
+      },
+    );
   };
 
 // Re-exported for tests so they can spin up an isolated audio store.

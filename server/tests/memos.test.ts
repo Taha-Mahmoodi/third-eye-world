@@ -358,3 +358,79 @@ describe('GET /api/memos', () => {
     expect(response.json<{ error: string }>().error).toBe('invalid_query');
   });
 });
+
+describe('GET /api/memos/:id/audio', () => {
+  let ctx: Awaited<ReturnType<typeof makeApp>>;
+
+  beforeEach(async () => {
+    ctx = await makeApp();
+  });
+
+  afterEach(async () => {
+    await ctx.app.close();
+    await rm(ctx.tmpDir, { recursive: true, force: true });
+  });
+
+  it('streams the audio bytes for a real memo', async () => {
+    const { body, headers } = buildMultipart(
+      'audio',
+      'memo.webm',
+      'audio/webm',
+      SAMPLE_AUDIO,
+    );
+
+    const upload = await ctx.app.inject({
+      method: 'POST',
+      url: '/api/memos',
+      payload: body,
+      headers,
+    });
+    const memo = upload.json<{ id: string }>();
+
+    const stream = await ctx.app.inject({
+      method: 'GET',
+      url: `/api/memos/${memo.id}/audio`,
+    });
+
+    expect(stream.statusCode).toBe(200);
+    expect(stream.headers['content-type']).toContain('audio/webm');
+    expect(stream.headers['cache-control']).toContain('immutable');
+    expect(Number(stream.headers['content-length'])).toBe(SAMPLE_AUDIO.length);
+    expect(Buffer.from(stream.rawPayload).equals(SAMPLE_AUDIO)).toBe(true);
+  });
+
+  it('returns 404 for an unknown memo id', async () => {
+    const response = await ctx.app.inject({
+      method: 'GET',
+      url: '/api/memos/this-id-does-not-exist/audio',
+    });
+
+    expect(response.statusCode).toBe(404);
+    expect(response.json<{ error: string }>().error).toBe('memo_not_found');
+  });
+
+  it('returns 404 when the DB row exists but the file is gone', async () => {
+    // Insert a memo whose audio_path points at a file that does not exist.
+    ctx.db
+      .prepare(
+        `INSERT INTO memos (id, user_id, audio_path, mime_type, duration_ms, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        'orphan-1',
+        DEMO_USER_ID,
+        'never-written.webm',
+        'audio/webm',
+        null,
+        Date.now(),
+      );
+
+    const response = await ctx.app.inject({
+      method: 'GET',
+      url: '/api/memos/orphan-1/audio',
+    });
+
+    expect(response.statusCode).toBe(404);
+    expect(response.json<{ error: string }>().error).toBe('audio_missing');
+  });
+});
