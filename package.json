@@ -16,7 +16,12 @@
     "test:e2e": "npm run test:e2e --workspaces --if-present",
     "build": "npm run build --workspaces --if-present",
     "dev:server": "npm run dev --workspace server",
-    "dev:client": "npm run dev --workspace client"
+    "dev:client": "npm run dev --workspace client",
+    "generate:phrases": "tsx scripts/generate-phrases.ts"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
   },
   "engines": {
     "node": ">=20.0.0"

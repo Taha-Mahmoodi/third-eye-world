@@ -1,0 +1,16 @@
+Pre-generated ElevenLabs MP3s land here, one per StringKey, written by
+`scripts/generate-phrases.ts`. The MP3 files are committed to the repo —
+this `.gitkeep` exists so the empty directory is checked in before the
+first run.
+
+To populate (requires ELEVENLABS_API_KEY + ELEVENLABS_VOICE_ID):
+
+    npm run generate:phrases
+
+To regenerate every phrase even if the file already exists:
+
+    npm run generate:phrases -- --force
+
+To regenerate one specific key:
+
+    npm run generate:phrases -- --key RECORDING_POSTED
