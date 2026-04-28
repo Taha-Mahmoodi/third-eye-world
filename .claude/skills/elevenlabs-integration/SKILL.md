@@ -15,47 +15,71 @@ This skill is the source of truth for how Third Eye World talks to ElevenLabs. I
 
 ## Status
 
-**Skeleton.** Populated in Phase 3 (`feature/elevenlabs-skill`, INSTRUCTIONS.md § 9). The contract below is the spec — implementation lands then.
+**Active.** Promoted from skeleton in Phase 3. The contract below governs:
+- `server/src/routes/tts.ts` (`feature/tts-proxy`)
+- `scripts/generate-phrases.ts` (`feature/phrase-pregenerator`)
+- `client/src/voice/speak.ts` four-link chain (`feature/client-tts-player`)
+- `/_internal/voices` test page (`feature/voice-selection-test-page`)
+
+Voice ID selection is the only step that requires a human (a blind tester picks one of the candidate voices via `/_internal/voices`, the chosen ID lands in `ELEVENLABS_VOICE_ID`).
 
 ## The two tiers (INSTRUCTIONS.md § 11)
 
-**Pre-generated MP3s** for fixed phrases (≈ 16 of them — every entry in `client/src/strings.ts` that has no variable). Generated once at build via `scripts/generate-phrases.ts`. Written to `client/public/audio/phrases/<key>.mp3` and committed to the repo. The client tries these first.
+**Pre-generated MP3s** for fixed phrases — every entry in `client/src/strings.ts` that has no variable. v1 set is 19 phrases (record/playback/likes/comments/control/help — see strings.ts). Generated once at build via `scripts/generate-phrases.ts`. Written to `client/public/audio/phrases/<KEY>.mp3` (snake-case from the StringKey) and committed to the repo. The client tries these first.
 
-**Streamed dynamic** for phrases with variables ("Memo from Asha, posted two minutes ago"). Server-side cached by phrase hash so the same phrase is not re-generated.
+**Streamed dynamic** for phrases with variables ("Memo from Asha, posted two minutes ago"). These do not exist yet in v1; they arrive in Phase 4 (memo announcements) and Phase 5 (LLM replies). Server-side cached by phrase hash so the same phrase is not re-generated.
 
-## Voice settings (defaults — finalize after voice testing in Phase 3)
+## Voice settings
 
 ```
-stability: 0.5
+stability:        0.5
 similarity_boost: 0.75
-model:
-  - eleven_turbo_v2_5    # for streaming dynamic phrases (low latency)
-  - eleven_multilingual_v2  # for pre-baked phrases (best quality)
+style:            0
+use_speaker_boost: true
+
+models:
+  - eleven_multilingual_v2   # pre-baked phrases — best quality, slightly slower
+  - eleven_turbo_v2_5        # streaming dynamic phrases — low first-byte latency
 ```
 
-Voice ID is picked via the `/_internal/voices` test page in Phase 3 with at least one blind tester. The chosen ID lives in `ELEVENLABS_VOICE_ID` (`.env`).
+Voice ID is picked via the `/_internal/voices` test page with at least one blind tester. The chosen ID lives in `ELEVENLABS_VOICE_ID` (`.env`). Default candidates the page surfaces: Rachel (`21m00Tcm4TlvDq8ikWAM`), Bella (`EXAVITQu4vr4xnSDxMaL`), Adam (`pNInz6obpgDQGcFmaJgB`), Antoni (`ErXwobaYiN019PkySvjV`).
 
 ## Server proxy contract (`/api/tts`)
 
 ```
-GET /api/tts?text=<text>&voice=<voiceId>
+GET /api/tts?text=<text>&voice=<voiceId>&model=<modelId>
 ```
 
-- Holds the API key. The browser must never see it (§ 2 #9).
+- Holds `ELEVENLABS_API_KEY`. The browser must never see it (§ 2 #9).
 - Streams audio chunks back as `audio/mpeg`.
-- Caches by `sha256(text + voiceId + JSON.stringify(settings))` on disk under `server/cache/tts/`. TTL: never expire (audio for the same input is deterministic enough).
-- Rate-limited per session (§ 13).
-- Input length capped at 200 chars (§ 11) — phrases longer than that are a sign something is wrong upstream.
-- 4xx error if `text` is empty, longer than 200 chars, or `voice` is not in the allowed list.
+- Caches by `sha256(text|voiceId|modelId|settingsJson)` on disk under `<TTS_CACHE_DIR>/<first-2-of-key>/<key>.mp3`. TTL: never expire (audio for the same input is deterministic enough).
+- Rate-limited per session (§ 13). Default 60/min, configurable via `BuildOptions.rateLimitPerMinute`.
+- Validation:
+  - `text` required, 1–200 chars (§ 11). 4xx with `{ error: 'invalid_text' }` otherwise.
+  - `voice` required, must match `ELEVENLABS_ALLOWED_VOICES` (comma-separated env var) or the default `ELEVENLABS_VOICE_ID`. Otherwise 4xx with `{ error: 'invalid_voice' }`.
+  - `model` optional. If provided, must be one of `eleven_multilingual_v2` or `eleven_turbo_v2_5`. Defaults to `eleven_multilingual_v2`.
+- Cache hit → 200 with the bytes streamed from disk.
+- Cache miss → server calls ElevenLabs `POST /v1/text-to-speech/<voiceId>/stream` with the API key, pipes bytes to both the client and the on-disk cache file simultaneously.
+- ElevenLabs error → server returns 502 with `{ error: 'tts_upstream' }`. The client falls back to Web Speech (link 4 of the chain) so the app stays audible.
+- Missing API key → server returns 503 with `{ error: 'tts_disabled' }`. Same fallback.
+
+## Environment variables
+
+```
+ELEVENLABS_API_KEY        required for any non-cached TTS
+ELEVENLABS_VOICE_ID       default voice; required at runtime
+ELEVENLABS_ALLOWED_VOICES optional comma-separated allow-list (defaults to just ELEVENLABS_VOICE_ID)
+TTS_CACHE_DIR             defaults to ./cache/tts
+```
 
 ## Cache key format
 
 ```
-key = sha256(text + "|" + voiceId + "|" + settingsJson)
-path = server/cache/tts/<first-2-of-key>/<key>.mp3
+key = sha256(text + "|" + voiceId + "|" + modelId + "|" + settingsJson)
+path = <TTS_CACHE_DIR>/<first-2-of-key>/<key>.mp3
 ```
 
-First-2-of-key sharding keeps the cache directory from holding hundreds of files at one level.
+First-2-of-key sharding keeps the cache directory from holding hundreds of files at one level. The `settingsJson` is the canonical JSON of `{ stability, similarity_boost, style, use_speaker_boost }` so a settings change invalidates the cache without us having to wipe the directory.
 
 ## Fallback chain (single `speak(key)` on the client)
 
