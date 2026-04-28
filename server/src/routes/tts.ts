@@ -38,7 +38,7 @@ const ttsQuerySchema = z.object({
     .string()
     .min(1, 'text is required')
     .max(TTS_TEXT_MAX_LEN, `text must be ${TTS_TEXT_MAX_LEN} chars or fewer`),
-  voice: z.string().min(1, 'voice is required'),
+  voice: z.string().min(1).optional(),
   model: z.enum(ALLOWED_MODELS).optional(),
 });
 
@@ -50,6 +50,9 @@ export interface TtsRoutesOptions {
   /** Voices the proxy will pass through to ElevenLabs. Always validated
    *  against this allow-list to prevent voice-id injection abuse. */
   allowedVoices: ReadonlySet<string>;
+  /** Default voice when ?voice= is omitted. Required for the client
+   *  fallback path where the browser does not know voice IDs. */
+  defaultVoice?: string;
   defaultSettings?: TtsSettings;
 }
 
@@ -66,9 +69,16 @@ export const ttsRoutes = (options: TtsRoutesOptions): FastifyPluginAsync =>
           message: parsed.error.errors[0]?.message ?? 'invalid query',
         });
       }
-      const { text, voice, model } = parsed.data;
+      const { text, model } = parsed.data;
       const modelId: TtsModelId = model ?? DEFAULT_TTS_MODEL;
+      const voice = parsed.data.voice ?? options.defaultVoice;
 
+      if (!voice) {
+        return reply.code(400).send({
+          error: 'invalid_voice',
+          message: 'voice is required and no default is configured',
+        });
+      }
       if (!options.allowedVoices.has(voice)) {
         return reply.code(400).send({
           error: 'invalid_voice',

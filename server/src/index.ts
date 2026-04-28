@@ -96,6 +96,7 @@ export async function buildServer(options: BuildOptions = {}): Promise<FastifyIn
       client: ttsClient,
       cache: ttsCache,
       allowedVoices: ttsAllowedVoices,
+      defaultVoice: process.env.ELEVENLABS_VOICE_ID?.trim(),
     }),
   );
 
