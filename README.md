@@ -4,24 +4,37 @@ A voice-first audio social network. The blind user is the default user, not an a
 
 The full build contract lives in [INSTRUCTIONS.md](INSTRUCTIONS.md). Read it before changing code.
 
-## Quick start
+## Quick start (local-only — no API keys needed)
 
 ```bash
 npm install
-cp .env.example .env   # fill in OPENAI_API_KEY, ELEVENLABS_API_KEY, SESSION_SECRET
-npm run dev
+cp .env.example .env
+npm run dev:server   # shell 1 — Fastify on :3000
+npm run dev:client   # shell 2 — Vite on :5173 → open this in your browser
 ```
 
-That's it. The dev server boots both client (Vite) and server (Fastify) and the app is reachable at `http://localhost:3000`.
+The app is reachable at `http://localhost:5173`. Spoken feedback uses the browser's built-in Web Speech API (`SpeechSynthesis`) — no ElevenLabs key required.
+
+## Going beyond local-only (ElevenLabs voice)
+
+The client's `speak()` function has a four-link fallback chain (pre-baked MP3 → server proxy → ElevenLabs streaming → Web Speech). The first three links are **disabled by default** so the app works offline / keyless. To enable the warm AI voice:
+
+1. Get an ElevenLabs API key.
+2. Set `ELEVENLABS_API_KEY` and `ELEVENLABS_VOICE_ID` in `.env`.
+3. Open `http://localhost:5173/_internal/voices/`, listen with a blind tester, pick a voice. (Per INSTRUCTIONS.md § 9 Phase 3 audit.)
+4. `npm run generate:phrases` — bakes the v1 phrases as MP3s under `client/public/audio/phrases/` (committed to repo).
+5. In `client/src/voice/speak.ts`, flip `ELEVENLABS_ENABLED` from `false` to `true`.
+
+The ElevenLabs path code is preserved in place; the constant is the only switch.
 
 ## What you can do today
 
 This README is updated phase-by-phase. See `INSTRUCTIONS.md` § 9 for the phased plan.
 
 - [x] Phase 0 — repo bootstrap
-- [ ] Phase 1 — record + play loop
-- [ ] Phase 2 — voice commands + keyboard equivalents
-- [ ] Phase 3 — ElevenLabs integration
+- [x] Phase 1 — record + play loop
+- [x] Phase 2 — voice commands + keyboard equivalents
+- [x] Phase 3 — ElevenLabs integration *(code merged; running in local-only mode pending the voice-quality audit and a baked phrase set)*
 - [ ] Phase 4 — comments + likes
 - [ ] Phase 5 — local LLM (Qwen 2.5 32B)
 - [ ] Phase 6 — voice onboarding
