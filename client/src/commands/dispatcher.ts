@@ -33,6 +33,11 @@ export interface DispatcherOptions {
   onLike?: () => Promise<void>;
   onUnlike?: () => Promise<void>;
   onCommentStart?: () => void;
+  /** Read the currently-playing memo. When supplied, the dispatcher
+   *  short-circuits COMMENT to NO_MEMO_TO_REPLY_TO if nothing is
+   *  playing. Phase 4: the queue exposes this via getCurrentMemo().
+   *  Returning null (or null-equivalent) means "nothing is playing." */
+  getCurrentMemo?: () => unknown;
   /** Called on parser fallback (utterance not recognized). */
   onUnknownCommand?: () => void;
   /** Optional signal for "I'm in the middle of a comment" — STOP cancels
@@ -108,10 +113,19 @@ export async function dispatchCommand(
         }
         return;
 
-      case CommandAction.COMMENT:
-        opts.onCommentStart?.();
+      case CommandAction.COMMENT: {
+        // If a current memo is exposed and there isn't one (queue idle, ended
+        // or empty), don't promise the user we can record a reply. Speak the
+        // contextual fallback instead.
+        const current = opts.getCurrentMemo?.();
+        if (opts.getCurrentMemo && !current) {
+          speak('NO_MEMO_TO_REPLY_TO', { liveRegion: opts.liveRegion });
+          return;
+        }
         speak(COMMAND_CONFIRMATION[action], { liveRegion: opts.liveRegion });
+        opts.onCommentStart?.();
         return;
+      }
 
       case CommandAction.STOP:
         // Universal kill switch (§ 2 #5). Cancel whichever long-running

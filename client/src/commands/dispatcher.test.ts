@@ -182,7 +182,23 @@ describe('dispatchCommand', () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
   });
 
-  it('COMMENT triggers onCommentStart and speaks COMMENT_RECORDING', async () => {
+  it('COMMENT triggers onCommentStart and speaks COMMENT_RECORDING when there is a current memo', async () => {
+    const getCurrentMemo = vi.fn().mockReturnValue({ id: 'm-1' });
+    await dispatchCommand(CommandAction.COMMENT, { ...opts(), getCurrentMemo });
+    expect(onCommentStart).toHaveBeenCalledTimes(1);
+    expect(liveRegion.textContent).toBe(STRINGS.COMMENT_RECORDING);
+  });
+
+  it('COMMENT speaks NO_MEMO_TO_REPLY_TO when getCurrentMemo returns null', async () => {
+    const getCurrentMemo = vi.fn().mockReturnValue(null);
+    await dispatchCommand(CommandAction.COMMENT, { ...opts(), getCurrentMemo });
+    expect(onCommentStart).not.toHaveBeenCalled();
+    expect(liveRegion.textContent).toBe(STRINGS.NO_MEMO_TO_REPLY_TO);
+  });
+
+  it('COMMENT falls back to legacy behavior when getCurrentMemo is not provided', async () => {
+    // Pre-Phase-4 callers: dispatcher does NOT short-circuit and just
+    // speaks COMMENT_RECORDING + fires onCommentStart.
     await dispatchCommand(CommandAction.COMMENT, opts());
     expect(onCommentStart).toHaveBeenCalledTimes(1);
     expect(liveRegion.textContent).toBe(STRINGS.COMMENT_RECORDING);

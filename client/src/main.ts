@@ -109,26 +109,60 @@ function init(): void {
     button.textContent = state === 'recording' ? 'Stop & post' : 'Record';
   }
 
-  // The "post-memo flow" the dispatcher invokes on RECORD_STOP_POST. Owns
-  // its own user-facing speak() calls because only it knows whether the
-  // upload + fetch + queue.start sequence succeeded.
+  // What the next "stop & post" should do — record a top-level memo, or
+  // record a comment attached to a specific memo.
+  type RecordingTarget = 'memo' | { type: 'comment'; memoId: string } | null;
+  let recordingTarget: RecordingTarget = null;
+
+  async function postMemoFlow(blob: Blob): Promise<void> {
+    await postMemo(blob);
+    speak('RECORDING_POSTED', { liveRegion });
+
+    const memos = await fetchFeed();
+    if (memos.length === 0) {
+      speak('FEED_EMPTY', { liveRegion });
+      return;
+    }
+    speak('PLAYBACK_STARTING', { liveRegion });
+    queue.load(memos);
+    queue.start();
+  }
+
+  async function postCommentFlow(memoId: string, blob: Blob): Promise<void> {
+    const form = new FormData();
+    form.append('audio', blob, 'comment');
+    const response = await fetch(`/api/memos/${memoId}/comments`, {
+      method: 'POST',
+      body: form,
+    });
+    if (!response.ok) {
+      throw new Error(`POST /api/memos/${memoId}/comments failed: ${response.status}`);
+    }
+    speak('COMMENT_POSTED', { liveRegion });
+    // Resume the parent feed so the listener can keep going.
+    queue.resume();
+  }
+
+  // The dispatcher invokes this on RECORD_STOP_POST. We branch on
+  // recordingTarget — set when the recorder started, cleared in `finally`.
   async function runPostFlow(): Promise<void> {
+    const target = recordingTarget;
     try {
       const blob = await recorder.stop();
-      await postMemo(blob);
-      speak('RECORDING_POSTED', { liveRegion });
-
-      const memos = await fetchFeed();
-      if (memos.length === 0) {
-        speak('FEED_EMPTY', { liveRegion });
-        return;
+      if (target && target !== 'memo' && target.type === 'comment') {
+        await postCommentFlow(target.memoId, blob);
+      } else {
+        await postMemoFlow(blob);
       }
-      speak('PLAYBACK_STARTING', { liveRegion });
-      queue.load(memos);
-      queue.start();
     } catch {
-      speak('RECORDING_FAILED', { liveRegion });
+      speak(
+        target && target !== 'memo' && target.type === 'comment'
+          ? 'COMMENT_FAILED'
+          : 'RECORDING_FAILED',
+        { liveRegion },
+      );
     } finally {
+      recordingTarget = null;
       setButtonState('idle');
     }
   }
@@ -142,6 +176,18 @@ function init(): void {
     }
   }
 
+  function startCommentRecording(): void {
+    const memo = queue.getCurrentMemo();
+    if (!memo) return; // dispatcher should have caught this
+    queue.pause();
+    recordingTarget = { type: 'comment', memoId: memo.id };
+    void recorder.start().catch(() => {
+      recordingTarget = null;
+      speak('RECORDING_FAILED', { liveRegion });
+    });
+    setButtonState('recording');
+  }
+
   // The button-state side effects of RECORD_START aren't visible to the
   // dispatcher itself (it just calls recorder.start). We attach a tiny
   // proxy that flips the label after the recorder is actually started.
@@ -152,6 +198,8 @@ function init(): void {
     onPostMemo: runPostFlow,
     onLike: () => likeCurrent('POST'),
     onUnlike: () => likeCurrent('DELETE'),
+    onCommentStart: startCommentRecording,
+    getCurrentMemo: () => queue.getCurrentMemo(),
   };
 
   async function dispatch(action: CommandAction | null): Promise<void> {
@@ -160,9 +208,13 @@ function init(): void {
     // Mirror state changes onto the button. The dispatcher is intentionally
     // unaware of UI; this is the seam where it lands.
     if (action === CommandAction.RECORD_START && !wasRecording && recorder.isRecording()) {
+      // RECORD_START always means a top-level memo (the user said "record"
+      // or pressed R). COMMENT goes through onCommentStart instead.
+      recordingTarget = 'memo';
       setButtonState('recording');
     }
     if (action === CommandAction.STOP && wasRecording) {
+      recordingTarget = null;
       setButtonState('idle');
     }
   }
