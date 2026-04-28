@@ -21,11 +21,20 @@
 import { AudioRecorder } from './audio/recorder.js';
 import { PlaybackQueue, type PlayableMemo } from './audio/playback-queue.js';
 import { speak } from './voice/speak.js';
+import { STRINGS } from './strings.js';
 import { CommandListener } from './voice/recognition.js';
 import { CommandAction } from './commands/registry.js';
 import { parseCommand } from './commands/parser.js';
 import { dispatchCommand } from './commands/dispatcher.js';
 import { KeyboardCommandHandler } from './commands/keyboard.js';
+
+/** Build the spoken replies-announcement using the strings.ts template.
+ *  The phrase wording stays in strings.ts (§ 2 #10 escape hatch for
+ *  variable-bearing phrases — see speak() textOverride). */
+function repliesAnnouncementText(count: number): string {
+  if (count === 1) return STRINGS.REPLIES_ANNOUNCEMENT_ONE;
+  return STRINGS.REPLIES_ANNOUNCEMENT_MANY.replace('{count}', String(count));
+}
 
 const RECORD_BUTTON_LABEL = {
   idle: 'Start recording a memo',
@@ -37,6 +46,7 @@ interface MemosListResponse {
     id: string;
     audio_url: string;
     mime_type: string;
+    comment_count?: number;
   }>;
 }
 
@@ -75,6 +85,7 @@ async function fetchFeed(): Promise<PlayableMemo[]> {
     id: m.id,
     audio_url: m.audio_url,
     mime_type: m.mime_type,
+    comment_count: typeof m.comment_count === 'number' ? m.comment_count : 0,
   }));
 }
 
@@ -91,6 +102,19 @@ function init(): void {
   const queue = new PlaybackQueue({
     onMemoStart: () => {
       isPlaybackActive = true;
+    },
+    onMemoEnd: (memo) => {
+      // Phase 4 task 5: announce replies between memos. Static phrase for 1
+      // reply, templated phrase otherwise. The next memo starts immediately
+      // after — the announcement is short on purpose so it does not delay
+      // playback.
+      const count = memo.comment_count ?? 0;
+      if (count > 0) {
+        speak('REPLIES_ANNOUNCEMENT_MANY', {
+          liveRegion,
+          textOverride: repliesAnnouncementText(count),
+        });
+      }
     },
     onAllEnded: () => {
       isPlaybackActive = false;

@@ -21,6 +21,9 @@ export interface PlayableMemo {
   audio_url: string;
   /** Optional — if supplied, used as the `<audio>` element's `type` hint. */
   mime_type?: string;
+  /** Number of replies on this memo. Used by the spoken
+   *  REPLIES_ANNOUNCEMENT after the memo finishes playing. */
+  comment_count?: number;
 }
 
 export interface PlaybackQueueCallbacks {
