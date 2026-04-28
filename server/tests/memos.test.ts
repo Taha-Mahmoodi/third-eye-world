@@ -223,6 +223,7 @@ interface MemoListResponse {
     mime_type: string;
     duration_ms: number | null;
     created_at: number;
+    comment_count: number;
   }>;
   next_cursor: string | null;
 }
@@ -283,8 +284,29 @@ describe('GET /api/memos', () => {
       mime_type: 'audio/webm',
       duration_ms: null,
       created_at: 1_000_002,
+      comment_count: 0,
     });
     expect(body.next_cursor).toBeNull();
+  });
+
+  it('reports comment_count for memos that have comments', async () => {
+    seedMemos(ctx.db, 2, 1_000_000);
+    const insertComment = ctx.db.prepare(
+      `INSERT INTO comments (id, memo_id, user_id, audio_path, mime_type, duration_ms, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    );
+    insertComment.run('c-1', 'm-001', DEMO_USER_ID, 'a.webm', 'audio/webm', null, 1);
+    insertComment.run('c-2', 'm-001', DEMO_USER_ID, 'b.webm', 'audio/webm', null, 2);
+    insertComment.run('c-3', 'm-001', DEMO_USER_ID, 'c.webm', 'audio/webm', null, 3);
+    // m-000 has no comments.
+
+    const response = await ctx.app.inject({ method: 'GET', url: '/api/memos' });
+    const body = response.json<MemoListResponse>();
+
+    const m1 = body.memos.find((m) => m.id === 'm-001');
+    const m0 = body.memos.find((m) => m.id === 'm-000');
+    expect(m1?.comment_count).toBe(3);
+    expect(m0?.comment_count).toBe(0);
   });
 
   it('honors a custom limit and returns a next_cursor when more remain', async () => {

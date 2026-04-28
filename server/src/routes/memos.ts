@@ -65,6 +65,7 @@ export interface MemoListItem {
   mime_type: string;
   duration_ms: number | null;
   created_at: number;
+  comment_count: number;
 }
 
 interface MemoListRow {
@@ -75,6 +76,7 @@ interface MemoListRow {
   created_at: number;
   user_id: string;
   user_name: string;
+  comment_count: number;
 }
 
 interface CursorValue {
@@ -217,7 +219,8 @@ export const memosRoutes = (options: MemosRoutesOptions): FastifyPluginAsync =>
               MemoListRow
             >(
               `SELECT m.id, m.audio_path, m.mime_type, m.duration_ms, m.created_at,
-                      u.id AS user_id, u.name AS user_name
+                      u.id AS user_id, u.name AS user_name,
+                      (SELECT COUNT(*) FROM comments c WHERE c.memo_id = m.id) AS comment_count
                  FROM memos m
                  JOIN users u ON u.id = m.user_id
                 WHERE m.created_at < ?
@@ -229,7 +232,8 @@ export const memosRoutes = (options: MemosRoutesOptions): FastifyPluginAsync =>
         : options.db
             .prepare<[number], MemoListRow>(
               `SELECT m.id, m.audio_path, m.mime_type, m.duration_ms, m.created_at,
-                      u.id AS user_id, u.name AS user_name
+                      u.id AS user_id, u.name AS user_name,
+                      (SELECT COUNT(*) FROM comments c WHERE c.memo_id = m.id) AS comment_count
                  FROM memos m
                  JOIN users u ON u.id = m.user_id
                 ORDER BY m.created_at DESC, m.id DESC
@@ -250,6 +254,7 @@ export const memosRoutes = (options: MemosRoutesOptions): FastifyPluginAsync =>
         mime_type: row.mime_type,
         duration_ms: row.duration_ms,
         created_at: row.created_at,
+        comment_count: row.comment_count,
       }));
 
       return reply.send({ memos, next_cursor: nextCursor });

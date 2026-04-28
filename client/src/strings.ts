@@ -44,6 +44,12 @@ export const STRINGS = {
   COMMENT_POSTED: 'Replied.',
   COMMENT_FAILED: "I couldn't send that reply. Try again.",
   NO_MEMO_TO_REPLY_TO: "Nothing to reply to right now. Say next or record.",
+  // Replies announcement (Phase 4 task 5). {count} is substituted at the
+  // call site — this template is the only place the wording lives. The
+  // brace placeholder avoids the markdown-emphasis regex in the tone-
+  // contract test that flags underscores.
+  REPLIES_ANNOUNCEMENT_ONE: 'This memo has 1 reply.',
+  REPLIES_ANNOUNCEMENT_MANY: 'This memo has {count} replies.',
 
   // Control
   CANCELLED: 'Cancelled.',
