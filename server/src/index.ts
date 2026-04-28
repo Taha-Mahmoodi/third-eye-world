@@ -15,6 +15,8 @@ import { memosRoutes, MAX_AUDIO_BYTES } from './routes/memos.js';
 import { likesRoutes } from './routes/likes.js';
 import { commentsRoutes } from './routes/comments.js';
 import { ttsRoutes } from './routes/tts.js';
+import { llmRoutes } from './routes/llm.js';
+import { createLlmClient, type LlmClient } from './llm/client.js';
 
 const DEFAULT_TTS_CACHE_DIR = './cache/tts';
 
@@ -26,6 +28,9 @@ export interface BuildOptions {
    *  intended behavior when ELEVENLABS_API_KEY is unset). */
   ttsClient?: TtsClient | null;
   ttsAllowedVoices?: ReadonlySet<string>;
+  /** Pass null to force /api/llm to return 503 (test seam + the
+   *  intended behavior when LLM_BASE_URL is unset). */
+  llmClient?: LlmClient | null;
   /** Rate limit max per minute. Defaults to 60 per session in prod-like
    *  setups; tests can pass a high number to disable. */
   rateLimitPerMinute?: number;
@@ -77,6 +82,17 @@ export async function buildServer(options: BuildOptions = {}): Promise<FastifyIn
 
   const ttsAllowedVoices = options.ttsAllowedVoices ?? parseAllowedVoices();
 
+  const llmClient =
+    options.llmClient !== undefined
+      ? options.llmClient
+      : process.env.LLM_BASE_URL
+        ? createLlmClient({
+            baseUrl: process.env.LLM_BASE_URL,
+            model: process.env.LLM_MODEL ?? 'qwen2.5:32b-instruct',
+            apiKey: process.env.LLM_API_KEY ?? 'ollama',
+          })
+        : null;
+
   await app.register(multipart, {
     limits: {
       fileSize: MAX_AUDIO_BYTES,
@@ -104,6 +120,7 @@ export async function buildServer(options: BuildOptions = {}): Promise<FastifyIn
       defaultVoice: process.env.ELEVENLABS_VOICE_ID?.trim(),
     }),
   );
+  await app.register(llmRoutes({ client: llmClient }));
 
   return app;
 }
