@@ -58,6 +58,14 @@ export const STRINGS = {
   // Help
   HELP_LIST:
     'Try record, post, next, like, comment, or stop. Say help any time to hear this again.',
+
+  // Phase 5 task 7 — LLM degraded mode (§ 18). Fired when /api/llm was
+  // attempted and failed AND the deterministic parser also could not
+  // resolve the transcript. Distinct from UNKNOWN_COMMAND so a real
+  // backend outage gets a contextual message, not a generic
+  // "say help" prompt.
+  DEGRADED_MODE:
+    "I'm having trouble understanding right now. Try saying next, like, or comment.",
 } as const;
 
 export type StringKey = keyof typeof STRINGS;

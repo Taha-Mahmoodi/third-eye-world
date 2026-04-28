@@ -35,6 +35,22 @@ export interface LlmPipelineResult {
   executed: string[];
 }
 
+/**
+ * Outcome of one /api/llm round-trip. The caller distinguishes:
+ * - 'ok'       → use the speak_text + dispatch the actions
+ * - 'disabled' → server returned 503 llm_disabled (LLM not configured —
+ *                expected in local-only mode, fall to deterministic parser
+ *                without firing DEGRADED_MODE)
+ * - 'errored'  → 502 / 504 / network / shape error. Caller falls to
+ *                deterministic parser; if that also fails, speak
+ *                STRINGS.DEGRADED_MODE because the LLM was tried but
+ *                broke (§ 18 contextual fallback).
+ */
+export type LlmPipelineOutcome =
+  | { status: 'ok'; result: LlmPipelineResult }
+  | { status: 'disabled' }
+  | { status: 'errored' };
+
 interface LlmRouteResponse {
   speak_text: string;
   client_actions: Array<{ name: string }>;
@@ -61,17 +77,18 @@ export interface LlmPipelineOptions {
 }
 
 /**
- * Send the transcript to /api/llm. Returns a structured result on success,
- * null on any failure (caller falls back to the Phase 2 deterministic
- * parser).
+ * Send the transcript to /api/llm. Returns:
+ * - { status: 'ok', result }   on success
+ * - { status: 'disabled' }     when the server returns 503 llm_disabled
+ * - { status: 'errored' }      on any other failure
  */
 export async function routeViaLlm(
   transcript: string,
   context: LlmPipelineContext,
   options: LlmPipelineOptions = {},
-): Promise<LlmPipelineResult | null> {
+): Promise<LlmPipelineOutcome> {
   const fetchImpl = options.fetchImpl ?? globalThis.fetch?.bind(globalThis);
-  if (!fetchImpl) return null;
+  if (!fetchImpl) return { status: 'errored' };
 
   let response: Response;
   try {
@@ -81,22 +98,27 @@ export async function routeViaLlm(
       body: JSON.stringify({ transcript, context }),
     });
   } catch {
-    return null; // network error → fall through
+    return { status: 'errored' };
   }
 
+  if (response.status === 503) {
+    // llm_disabled — server has no LLM configured. This is the steady
+    // state in local-only mode; no degraded message at the caller.
+    return { status: 'disabled' };
+  }
   if (!response.ok) {
-    return null; // 503 / 502 / 504 / 400 → fall through
+    return { status: 'errored' };
   }
 
   let data: LlmRouteResponse;
   try {
     data = (await response.json()) as LlmRouteResponse;
   } catch {
-    return null;
+    return { status: 'errored' };
   }
 
   if (typeof data.speak_text !== 'string' || !Array.isArray(data.client_actions)) {
-    return null;
+    return { status: 'errored' };
   }
 
   const actions: CommandAction[] = [];
@@ -112,5 +134,8 @@ export async function routeViaLlm(
 
   const executed = (data.executed ?? []).map((c) => c.name);
 
-  return { speak_text: data.speak_text, actions, executed };
+  return {
+    status: 'ok',
+    result: { speak_text: data.speak_text, actions, executed },
+  };
 }
