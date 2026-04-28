@@ -111,6 +111,14 @@ export class PlaybackQueue {
     return { state: this.state, cursor: this.cursor, total: this.memos.length };
   }
 
+  /** The memo at the current cursor (i.e. the one playing or paused).
+   *  Returns null when the queue is idle, ended, or empty. Used by the
+   *  dispatcher hooks for "like the current memo", "comment on it", etc. */
+  getCurrentMemo(): PlayableMemo | null {
+    if (this.state === 'ended' || this.state === 'idle') return null;
+    return this.memos[this.cursor] ?? null;
+  }
+
   private playAtCursor(): void {
     const memo = this.memos[this.cursor];
     if (!memo) {

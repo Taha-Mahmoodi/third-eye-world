@@ -148,16 +148,38 @@ describe('dispatchCommand', () => {
     expect(liveRegion.textContent).toBe(STRINGS.PLAYBACK_RESUMED);
   });
 
-  it('LIKE calls onLike and speaks LIKED', async () => {
+  it('LIKE speaks LIKED immediately and fires onLike (fire-and-forget)', async () => {
     await dispatchCommand(CommandAction.LIKE, opts());
-    expect(onLike).toHaveBeenCalledTimes(1);
+    // Spoken confirmation lands synchronously; onLike() is invoked but
+    // the dispatcher does not await its promise.
     expect(liveRegion.textContent).toBe(STRINGS.LIKED);
+    expect(onLike).toHaveBeenCalledTimes(1);
   });
 
-  it('UNLIKE calls onUnlike and speaks UNLIKED', async () => {
+  it('LIKE swallows a network error from onLike (user already heard "Liked.")', async () => {
+    onLike.mockRejectedValueOnce(new Error('500 from /api/memos/x/like'));
+    await expect(
+      dispatchCommand(CommandAction.LIKE, opts()),
+    ).resolves.toBeUndefined();
+    expect(liveRegion.textContent).toBe(STRINGS.LIKED);
+    // Flush the pending rejection so vitest does not flag an unhandled
+    // rejection at teardown.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+
+  it('UNLIKE speaks UNLIKED immediately and fires onUnlike (fire-and-forget)', async () => {
     await dispatchCommand(CommandAction.UNLIKE, opts());
-    expect(onUnlike).toHaveBeenCalledTimes(1);
     expect(liveRegion.textContent).toBe(STRINGS.UNLIKED);
+    expect(onUnlike).toHaveBeenCalledTimes(1);
+  });
+
+  it('UNLIKE swallows a network error from onUnlike', async () => {
+    onUnlike.mockRejectedValueOnce(new Error('boom'));
+    await expect(
+      dispatchCommand(CommandAction.UNLIKE, opts()),
+    ).resolves.toBeUndefined();
+    expect(liveRegion.textContent).toBe(STRINGS.UNLIKED);
+    await new Promise((resolve) => setTimeout(resolve, 0));
   });
 
   it('COMMENT triggers onCommentStart and speaks COMMENT_RECORDING', async () => {
