@@ -17,6 +17,8 @@ import { commentsRoutes } from './routes/comments.js';
 import { ttsRoutes } from './routes/tts.js';
 import { llmRoutes } from './routes/llm.js';
 import { createLlmClient, type LlmClient } from './llm/client.js';
+import { sttRoutes } from './routes/stt.js';
+import { createSttClient, type SttClient } from './lib/whisper.js';
 
 const DEFAULT_TTS_CACHE_DIR = './cache/tts';
 
@@ -31,6 +33,9 @@ export interface BuildOptions {
   /** Pass null to force /api/llm to return 503 (test seam + the
    *  intended behavior when LLM_BASE_URL is unset). */
   llmClient?: LlmClient | null;
+  /** Pass null to force /api/stt to return 503 (test seam + the
+   *  intended behavior when OPENAI_API_KEY is unset). */
+  sttClient?: SttClient | null;
   /** Rate limit max per minute. Defaults to 60 per session in prod-like
    *  setups; tests can pass a high number to disable. */
   rateLimitPerMinute?: number;
@@ -93,6 +98,13 @@ export async function buildServer(options: BuildOptions = {}): Promise<FastifyIn
           })
         : null;
 
+  const sttClient =
+    options.sttClient !== undefined
+      ? options.sttClient
+      : process.env.OPENAI_API_KEY
+        ? createSttClient({ apiKey: process.env.OPENAI_API_KEY })
+        : null;
+
   await app.register(multipart, {
     limits: {
       fileSize: MAX_AUDIO_BYTES,
@@ -121,6 +133,7 @@ export async function buildServer(options: BuildOptions = {}): Promise<FastifyIn
     }),
   );
   await app.register(llmRoutes({ client: llmClient, db }));
+  await app.register(sttRoutes({ client: sttClient }));
 
   return app;
 }
