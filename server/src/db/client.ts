@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3';
-import { readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -15,6 +15,13 @@ export interface OpenOptions {
 }
 
 export function openDatabase(options: OpenOptions): DB {
+  // Ensure the parent directory exists for file-backed databases. better-sqlite3
+  // throws "Cannot open database because the directory does not exist" otherwise,
+  // which is a poor first-run experience (caught on a fresh clone via
+  // `npm run dev:server`).
+  if (options.filename !== ':memory:') {
+    mkdirSync(dirname(resolve(options.filename)), { recursive: true });
+  }
   const db = new Database(options.filename);
 
   // Enforce foreign keys — SQLite has them off by default.
