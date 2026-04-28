@@ -12,6 +12,7 @@ import {
 import { createTtsCache, type TtsCache } from './lib/tts-cache.js';
 import { createTtsClient, type TtsClient } from './lib/elevenlabs.js';
 import { memosRoutes, MAX_AUDIO_BYTES } from './routes/memos.js';
+import { likesRoutes } from './routes/likes.js';
 import { ttsRoutes } from './routes/tts.js';
 
 const DEFAULT_TTS_CACHE_DIR = './cache/tts';
@@ -92,6 +93,7 @@ export async function buildServer(options: BuildOptions = {}): Promise<FastifyIn
   });
 
   await app.register(memosRoutes({ db, audioStore }));
+  await app.register(likesRoutes({ db }));
   await app.register(
     ttsRoutes({
       client: ttsClient,
