@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Voice Selection — Third Eye World</title>
+    <meta name="description" content="Internal page for picking the v1 ElevenLabs voice. Phase 3 task 5." />
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+      }
+      body {
+        max-width: 32rem;
+        margin: 2rem auto;
+        padding: 0 1rem;
+        line-height: 1.5;
+      }
+      h1 { margin-bottom: 0.25rem; }
+      .candidate-list {
+        list-style: none;
+        padding: 0;
+        margin: 1rem 0;
+        display: grid;
+        gap: 0.75rem;
+      }
+      .candidate-button {
+        font: inherit;
+        padding: 1rem;
+        border: 2px solid currentColor;
+        background: transparent;
+        color: inherit;
+        cursor: pointer;
+        text-align: left;
+      }
+      .candidate-button:focus-visible {
+        outline: 3px solid #0066ff;
+        outline-offset: 2px;
+      }
+      .candidate-name { font-weight: 600; font-size: 1.1rem; }
+      .candidate-id { font-family: ui-monospace, monospace; font-size: 0.85rem; opacity: 0.8; }
+      .status {
+        margin-top: 1rem;
+        padding: 0.75rem;
+        border-left: 4px solid currentColor;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Voice selection</h1>
+      <p>
+        Internal page for Phase 3 task 5. Picks the v1 voice for Third Eye
+        World. Once you've chosen, set
+        <code>ELEVENLABS_VOICE_ID</code> in <code>.env</code> and run
+        <code>npm run generate:phrases</code> to bake the v1 phrases.
+      </p>
+
+      <h2>Sample phrase</h2>
+      <p>
+        Each button below plays the same phrase in a different voice so
+        the comparison is direct.
+      </p>
+      <div id="phrase-display" aria-live="polite">Loading…</div>
+
+      <h2>Candidates</h2>
+      <ul id="candidates" class="candidate-list" aria-label="Candidate voices"></ul>
+
+      <div
+        id="status"
+        class="status"
+        role="status"
+        aria-live="polite"
+      >Press Tab to reach a candidate, then Space or Enter to play.</div>
+
+      <h2>Notes for the tester</h2>
+      <ul>
+        <li>The phrase plays through the server proxy at <code>/api/tts</code>. If you hear nothing, the server is missing <code>ELEVENLABS_API_KEY</code>.</li>
+        <li>Each voice ID must be in <code>ELEVENLABS_ALLOWED_VOICES</code> on the server (comma-separated). The proxy rejects unknown IDs with <code>400 invalid_voice</code>.</li>
+        <li>After picking, commit your choice to <code>.env.example</code> as a comment so the next person starts from there.</li>
+      </ul>
+    </main>
+
+    <script type="module">
+      // Candidates and the phrase live inline because this page is a
+      // standalone HTML file in client/public/ — Vite serves it as-is
+      // with no bundler step.
+      const CANDIDATES = [
+        { name: 'Rachel',  voiceId: '21m00Tcm4TlvDq8ikWAM' },
+        { name: 'Bella',   voiceId: 'EXAVITQu4vr4xnSDxMaL' },
+        { name: 'Adam',    voiceId: 'pNInz6obpgDQGcFmaJgB' },
+        { name: 'Antoni',  voiceId: 'ErXwobaYiN019PkySvjV' },
+      ];
+      const SAMPLE_PHRASE =
+        "Posted. That's everything for now. I didn't catch that. Say help to hear what you can say.";
+
+      const list = document.getElementById('candidates');
+      const status = document.getElementById('status');
+      const phraseDisplay = document.getElementById('phrase-display');
+      phraseDisplay.textContent = SAMPLE_PHRASE;
+
+      let currentAudio = null;
+
+      function announce(message) {
+        status.textContent = message;
+      }
+
+      function stopCurrent() {
+        if (currentAudio) {
+          currentAudio.pause();
+          currentAudio.currentTime = 0;
+          currentAudio = null;
+        }
+      }
+
+      async function playVoice(name, voiceId) {
+        stopCurrent();
+        announce(`Playing ${name}…`);
+
+        const url =
+          '/api/tts?text=' +
+          encodeURIComponent(SAMPLE_PHRASE) +
+          '&voice=' +
+          encodeURIComponent(voiceId);
+
+        try {
+          const response = await fetch(url);
+          if (!response.ok) {
+            const err = await response.json().catch(() => ({ error: 'unknown' }));
+            announce(
+              `${name}: server returned ${response.status} (${err.error || 'unknown'}). ` +
+              `Check ELEVENLABS_API_KEY and ELEVENLABS_ALLOWED_VOICES on the server.`,
+            );
+            return;
+          }
+          const blob = await response.blob();
+          const objectUrl = URL.createObjectURL(blob);
+          const audio = new Audio(objectUrl);
+          currentAudio = audio;
+          audio.addEventListener(
+            'ended',
+            () => {
+              URL.revokeObjectURL(objectUrl);
+              if (currentAudio === audio) currentAudio = null;
+              announce(`${name}: finished.`);
+            },
+            { once: true },
+          );
+          audio.addEventListener(
+            'error',
+            () => {
+              URL.revokeObjectURL(objectUrl);
+              if (currentAudio === audio) currentAudio = null;
+              announce(`${name}: audio playback failed.`);
+            },
+            { once: true },
+          );
+          await audio.play();
+        } catch (err) {
+          const message = err && err.message ? err.message : 'network error';
+          announce(`${name}: ${message}`);
+        }
+      }
+
+      for (const c of CANDIDATES) {
+        const li = document.createElement('li');
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'candidate-button';
+        btn.setAttribute('aria-label', 'Play ' + c.name + ' voice');
+        btn.innerHTML =
+          '<span class="candidate-name">' + c.name + '</span><br>' +
+          '<span class="candidate-id">' + c.voiceId + '</span>';
+        btn.addEventListener('click', () => {
+          void playVoice(c.name, c.voiceId);
+        });
+        li.appendChild(btn);
+        list.appendChild(li);
+      }
+
+      // Esc stops playback — keyboard parity with the main app's STOP.
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+          stopCurrent();
+          announce('Stopped.');
+        }
+      });
+    </script>
+  </body>
+</html>
