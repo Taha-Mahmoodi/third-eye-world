@@ -1,3 +1,4 @@
+import { pathToFileURL } from 'node:url';
 import Fastify, { type FastifyInstance } from 'fastify';
 import multipart from '@fastify/multipart';
 import rateLimit from '@fastify/rate-limit';
@@ -103,7 +104,12 @@ export async function buildServer(options: BuildOptions = {}): Promise<FastifyIn
   return app;
 }
 
-const isMain = import.meta.url === `file://${process.argv[1]}`;
+// pathToFileURL handles Windows backslash → forward-slash conversion that a
+// simple `file://${argv[1]}` does not. Without this, `npm run dev:server`
+// silently exits on Windows because the equality check fails.
+const isMain =
+  process.argv[1] !== undefined &&
+  import.meta.url === pathToFileURL(process.argv[1]).href;
 if (isMain) {
   const port = Number(process.env.PORT ?? 3000);
   buildServer()
