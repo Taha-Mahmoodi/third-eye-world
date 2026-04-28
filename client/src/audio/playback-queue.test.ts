@@ -226,4 +226,46 @@ describe('PlaybackQueue', () => {
     expect(firstAudio.paused).toBe(true);
     expect(queue.getState()).toMatchObject({ state: 'idle', cursor: 0, total: 2 });
   });
+
+  describe('getCurrentMemo()', () => {
+    it('returns null when idle (before start)', () => {
+      const queue = new PlaybackQueue();
+      queue.load([m('a'), m('b')]);
+      expect(queue.getCurrentMemo()).toBeNull();
+    });
+
+    it('returns the memo at the cursor while playing', () => {
+      const queue = new PlaybackQueue();
+      queue.load([m('a'), m('b'), m('c')]);
+      queue.start();
+      expect(queue.getCurrentMemo()?.id).toBe('a');
+
+      queue.next();
+      expect(queue.getCurrentMemo()?.id).toBe('b');
+    });
+
+    it('returns the memo at the cursor while paused', () => {
+      const queue = new PlaybackQueue();
+      queue.load([m('a'), m('b')]);
+      queue.start();
+      queue.pause();
+      expect(queue.getCurrentMemo()?.id).toBe('a');
+    });
+
+    it('returns null after the queue ends', () => {
+      const queue = new PlaybackQueue();
+      queue.load([m('a')]);
+      queue.start();
+      lastInstance().emitEnded();
+      expect(queue.getCurrentMemo()).toBeNull();
+    });
+
+    it('returns null after stop()', () => {
+      const queue = new PlaybackQueue();
+      queue.load([m('a'), m('b')]);
+      queue.start();
+      queue.stop();
+      expect(queue.getCurrentMemo()).toBeNull();
+    });
+  });
 });

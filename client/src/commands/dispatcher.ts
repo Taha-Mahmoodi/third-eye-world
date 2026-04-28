@@ -90,13 +90,22 @@ export async function dispatchCommand(
         return;
 
       case CommandAction.LIKE:
-        if (opts.onLike) await opts.onLike();
+        // Speak FIRST so the user gets immediate confirmation, then fire the
+        // network call as fire-and-forget. A slow /api/memos/:id/like must
+        // not delay the spoken "Liked." (~300ms target end-to-end).
+        // Errors are swallowed: the user already heard the confirmation, and
+        // a re-like / unlike will correct any drift.
         speak(COMMAND_CONFIRMATION[action], { liveRegion: opts.liveRegion });
+        if (opts.onLike) {
+          void opts.onLike().catch(() => undefined);
+        }
         return;
 
       case CommandAction.UNLIKE:
-        if (opts.onUnlike) await opts.onUnlike();
         speak(COMMAND_CONFIRMATION[action], { liveRegion: opts.liveRegion });
+        if (opts.onUnlike) {
+          void opts.onUnlike().catch(() => undefined);
+        }
         return;
 
       case CommandAction.COMMENT:

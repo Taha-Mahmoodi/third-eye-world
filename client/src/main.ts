@@ -133,6 +133,15 @@ function init(): void {
     }
   }
 
+  async function likeCurrent(method: 'POST' | 'DELETE'): Promise<void> {
+    const memo = queue.getCurrentMemo();
+    if (!memo) return;
+    const response = await fetch(`/api/memos/${memo.id}/like`, { method });
+    if (!response.ok) {
+      throw new Error(`like ${method} failed: ${response.status}`);
+    }
+  }
+
   // The button-state side effects of RECORD_START aren't visible to the
   // dispatcher itself (it just calls recorder.start). We attach a tiny
   // proxy that flips the label after the recorder is actually started.
@@ -141,6 +150,8 @@ function init(): void {
     queue,
     liveRegion,
     onPostMemo: runPostFlow,
+    onLike: () => likeCurrent('POST'),
+    onUnlike: () => likeCurrent('DELETE'),
   };
 
   async function dispatch(action: CommandAction | null): Promise<void> {
