@@ -23,6 +23,7 @@ import { PlaybackQueue, type PlayableMemo } from './audio/playback-queue.js';
 import { speak } from './voice/speak.js';
 import { STRINGS } from './strings.js';
 import { CommandListener } from './voice/recognition.js';
+import { routeViaLlm } from './voice/llm-pipeline.js';
 import { CommandAction } from './commands/registry.js';
 import { parseCommand } from './commands/parser.js';
 import { dispatchCommand } from './commands/dispatcher.js';
@@ -259,13 +260,45 @@ function init(): void {
   );
   keyboard.attach(document);
 
+  // Phase 5 task 6: full pipeline wiring.
+  //
+  // Each finalized voice transcript goes through:
+  //   1. /api/llm → returns { speak_text, client_actions, executed }
+  //      Server-side dispatcher already ran like_memo / unlike_memo;
+  //      we just speak the phrase + dispatch the client_actions.
+  //   2. If /api/llm is disabled / errored / timed out, fall back to
+  //      the Phase 2 deterministic parser (Phase 5 task 7).
+  //
+  // The LLM is OFF by default (LLM_BASE_URL unset → server returns 503),
+  // so today this is a single round-trip + fallback. Once Ollama / vLLM
+  // is configured, the LLM path takes over.
+  async function handleTranscript(transcript: string): Promise<void> {
+    const current = queue.getCurrentMemo();
+    const context = current
+      ? { current_memo: { id: current.id, user_name: 'Demo' } }
+      : {};
+    const llmResult = await routeViaLlm(transcript, context);
+    if (llmResult) {
+      speak('UNKNOWN_COMMAND', {
+        liveRegion,
+        textOverride: llmResult.speak_text,
+      });
+      for (const action of llmResult.actions) {
+        await dispatch(action);
+      }
+      return;
+    }
+    // LLM disabled / errored / timed out → deterministic parser.
+    await dispatch(parseCommand(transcript));
+  }
+
   // Voice command listener — always-on. Errors degrade gracefully:
   // mic-permission-denied speaks RECORDING_PERMISSION_DENIED and the user
   // can still use the button + keyboard.
   const listener = new CommandListener({
     onResult: ({ transcript, isFinal }) => {
       if (!isFinal) return;
-      void dispatch(parseCommand(transcript));
+      void handleTranscript(transcript);
     },
     onError: ({ fatal }) => {
       if (fatal) speak('RECORDING_PERMISSION_DENIED', { liveRegion });
