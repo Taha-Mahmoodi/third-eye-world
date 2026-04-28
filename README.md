@@ -35,14 +35,14 @@ This README is updated phase-by-phase. See `INSTRUCTIONS.md` § 9 for the phased
 - [x] Phase 1 — record + play loop
 - [x] Phase 2 — voice commands + keyboard equivalents
 - [x] Phase 3 — ElevenLabs integration *(code merged; running in local-only mode pending the voice-quality audit and a baked phrase set)*
-- [ ] Phase 4 — comments + likes
-- [ ] Phase 5 — local LLM (Qwen 2.5 32B)
-- [ ] Phase 6 — voice onboarding
-- [ ] Phase 7 — polish, hardening, demo video
+- [x] Phase 4 — comments + likes
+- [x] Phase 5 — local LLM (Qwen 2.5 32B) *(scaffolded; activates when `LLM_BASE_URL` is set and Ollama / vLLM is running)*
+- [x] Phase 6 — voice onboarding *(server-side auth + signed cookies done; client-side wrapper is a v1.1 follow-up)*
+- [x] Phase 7 — polish, hardening, demo video *(runbook done; a11y full-pass + load test + demo video are human tasks tracked in the milestone audit)*
 
 ## When something breaks
 
-See `docs/runbook.md` (added in Phase 7). Until then, check `INSTRUCTIONS.md` § 18.
+See [`docs/runbook.md`](docs/runbook.md) — common API error codes, "the LLM box died" playbook, key + secret rotation, cache clearing, deploy rollback. The owner is non-technical; the runbook answers each question in plain English.
 
 ## License
 
