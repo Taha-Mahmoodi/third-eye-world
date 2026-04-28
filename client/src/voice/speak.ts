@@ -1,5 +1,18 @@
 // speak() — the only entry point for spoken feedback in the app.
 //
+// LOCAL-ONLY MODE: the ElevenLabs path is disabled. Set ELEVENLABS_ENABLED
+// to true (and follow the steps in the comment block below) once you have
+// an API key + the v1 phrases pre-baked. Until then every speak() call
+// goes straight to Web Speech (link 4 of the four-link chain). Skipping
+// links 1 and 2 means no 404s on /audio/phrases/<KEY>.mp3 and no 503s on
+// /api/tts in local dev.
+//
+// To re-enable for production:
+//   1. Set ELEVENLABS_API_KEY and ELEVENLABS_VOICE_ID in .env.
+//   2. Run `npm run generate:phrases` to bake the v1 phrases.
+//   3. Flip ELEVENLABS_ENABLED below to true.
+//   4. Voice-quality audit at /_internal/voices/ with a blind tester.
+//
 // Phase 3 task 4 per INSTRUCTIONS.md § 9 + the elevenlabs-integration skill.
 //
 // Four-link fallback chain (§ 11):
@@ -13,14 +26,18 @@
 //   aria-live region SYNCHRONOUSLY, before any audio plays. Screen
 //   readers announce the phrase even if the audio chain is slow or
 //   fails entirely.
-// - #4 "App is never silent after a user action": every link is wrapped
-//   in try/catch — failure flows to the next link. Web Speech is the
-//   floor; SpeechSynthesis presence is checked but assumed available.
+// - #4 "App is never silent after a user action": Web Speech is the
+//   floor and is reached unconditionally in local-only mode.
 // - #10 "No spoken phrase inlined in code": this module reads from
 //   strings.ts. Callers pass StringKey values, never literals
 //   (textOverride is the controlled escape hatch for dynamic phrases).
 
 import { STRINGS, type StringKey } from '../strings.js';
+
+/** When false, links 1 and 2 are skipped and speak() goes straight to
+ *  Web Speech. Flip to true once `npm run generate:phrases` has been run
+ *  and ELEVENLABS_API_KEY is set on the server. */
+const ELEVENLABS_ENABLED = false;
 
 export interface SpeakOptions {
   /** Live region element to mirror the phrase into. Recommended for
@@ -31,7 +48,9 @@ export interface SpeakOptions {
    *  when this is set. */
   textOverride?: string;
   /** Override the voice path entirely — used by the voice-selection
-   *  test page. When set, the chain becomes only "this URL → Web Speech". */
+   *  test page. When set, the chain becomes only "this URL → Web Speech".
+   *  Honored even in local-only mode (the test page hits /api/tts
+   *  directly with a real API key in its own session). */
   audioUrl?: string;
 }
 
@@ -40,11 +59,14 @@ export interface SpeakChainOptions {
   fetchImpl?: typeof fetch;
   /** Override Audio constructor — used by tests. */
   audioConstructor?: typeof HTMLAudioElement;
+  /** Override the local-only flag — used by tests to exercise the
+   *  ElevenLabs chain without flipping the production constant. */
+  forceElevenLabsEnabled?: boolean;
 }
 
 let chainOverrides: SpeakChainOptions = {};
 
-/** Test seam — replace fetch / Audio to simulate the chain. */
+/** Test seam — replace fetch / Audio / flag to simulate the chain. */
 export function _setSpeakOverrides(overrides: SpeakChainOptions): void {
   chainOverrides = overrides;
 }
@@ -74,24 +96,30 @@ async function playSpeechChain(
   audioUrl: string | undefined,
 ): Promise<void> {
   // Direct URL override (voice-selection test page) — try only that URL,
-  // then fall through to Web Speech if it fails.
+  // then fall through to Web Speech if it fails. Honored regardless of
+  // ELEVENLABS_ENABLED so the test page works even when the rest of the
+  // app is in local-only mode.
   if (audioUrl) {
     if (await tryPlayUrl(audioUrl)) return;
     speakViaWebSpeech(text);
     return;
   }
 
-  // Link 1: pre-generated MP3 (only for static phrases).
-  if (phraseKey) {
-    const url = `/audio/phrases/${phraseKey}.mp3`;
-    if (await tryPlayUrl(url)) return;
+  const enabled = chainOverrides.forceElevenLabsEnabled ?? ELEVENLABS_ENABLED;
+  if (enabled) {
+    // Link 1: pre-generated MP3 (only for static phrases).
+    if (phraseKey) {
+      const url = `/audio/phrases/${phraseKey}.mp3`;
+      if (await tryPlayUrl(url)) return;
+    }
+
+    // Link 2: server proxy + cache + ElevenLabs streaming.
+    const serverUrl = `/api/tts?text=${encodeURIComponent(text)}`;
+    if (await tryPlayUrl(serverUrl)) return;
   }
 
-  // Link 2: server proxy + cache + ElevenLabs streaming.
-  const serverUrl = `/api/tts?text=${encodeURIComponent(text)}`;
-  if (await tryPlayUrl(serverUrl)) return;
-
-  // Link 3 (Web Speech): always reachable in supported browsers.
+  // Link 4 (Web Speech): always reachable in supported browsers, and the
+  // only path in local-only mode.
   speakViaWebSpeech(text);
 }
 

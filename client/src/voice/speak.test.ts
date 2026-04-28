@@ -46,11 +46,6 @@ describe('speak() — sync behavior', () => {
     FakeUtterance.instances = [];
     vi.stubGlobal('speechSynthesis', synth);
     vi.stubGlobal('SpeechSynthesisUtterance', FakeUtterance);
-    // Fetch always rejects so the chain falls through to Web Speech in
-    // these tests. The fallback-chain tests below cover the success path.
-    _setSpeakOverrides({
-      fetchImpl: vi.fn().mockRejectedValue(new Error('no fetch in test')),
-    });
 
     liveRegion = document.createElement('div');
     liveRegion.setAttribute('role', 'status');
@@ -69,7 +64,6 @@ describe('speak() — sync behavior', () => {
     // The aria-live update is synchronous so the screen reader announces
     // the phrase even if the audio chain stalls (§ 2 #3).
     expect(liveRegion.textContent).toBe(STRINGS.RECORDING_POSTED);
-    // Flush so the in-flight (rejected) fetch finishes before teardown.
     await flushChain();
   });
 
@@ -86,7 +80,55 @@ describe('speak() — sync behavior', () => {
   });
 });
 
-describe('speak() — fallback chain', () => {
+describe('speak() — local-only mode (default)', () => {
+  let synth: FakeSynthesis;
+  let liveRegion: HTMLDivElement;
+  let fetchImpl: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    synth = makeSynthesis();
+    FakeUtterance.instances = [];
+    vi.stubGlobal('speechSynthesis', synth);
+    vi.stubGlobal('SpeechSynthesisUtterance', FakeUtterance);
+
+    fetchImpl = vi.fn();
+    _setSpeakOverrides({ fetchImpl });
+
+    liveRegion = document.createElement('div');
+    document.body.appendChild(liveRegion);
+  });
+
+  afterEach(() => {
+    _resetSpeakOverrides();
+    vi.unstubAllGlobals();
+    liveRegion.remove();
+  });
+
+  it('skips the ElevenLabs path entirely and goes straight to Web Speech', async () => {
+    speak('RECORDING_POSTED', { liveRegion });
+    await flushChain();
+
+    // No fetch — neither /audio/phrases/ nor /api/tts.
+    expect(fetchImpl).not.toHaveBeenCalled();
+    // Web Speech fired immediately.
+    expect(synth.speak).toHaveBeenCalledTimes(1);
+    expect(FakeUtterance.instances[0]?.text).toBe(STRINGS.RECORDING_POSTED);
+  });
+
+  it('still honors audioUrl override (used by the voice-selection test page)', async () => {
+    fetchImpl.mockRejectedValue(new Error('test stub'));
+    speak('RECORDING_POSTED', {
+      liveRegion,
+      audioUrl: '/test/sample.mp3',
+    });
+    await flushChain();
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(fetchImpl).toHaveBeenCalledWith('/test/sample.mp3', expect.any(Object));
+  });
+});
+
+describe('speak() — fallback chain (when ElevenLabs path is enabled)', () => {
   let synth: FakeSynthesis;
   let liveRegion: HTMLDivElement;
   let fetchImpl: ReturnType<typeof vi.fn>;
@@ -109,7 +151,7 @@ describe('speak() — fallback chain', () => {
 
   it('falls through to Web Speech when both fetch links fail', async () => {
     fetchImpl = vi.fn().mockRejectedValue(new Error('offline'));
-    _setSpeakOverrides({ fetchImpl });
+    _setSpeakOverrides({ fetchImpl, forceElevenLabsEnabled: true });
 
     speak('RECORDING_POSTED', { liveRegion });
     await flushChain();
@@ -133,7 +175,7 @@ describe('speak() — fallback chain', () => {
     fetchImpl = vi.fn().mockResolvedValue(
       new Response('not found', { status: 404 }),
     );
-    _setSpeakOverrides({ fetchImpl });
+    _setSpeakOverrides({ fetchImpl, forceElevenLabsEnabled: true });
 
     speak('RECORDING_POSTED', { liveRegion });
     await flushChain();
@@ -145,7 +187,7 @@ describe('speak() — fallback chain', () => {
 
   it('skips link 1 (pre-baked) when textOverride is set (dynamic phrase)', async () => {
     fetchImpl = vi.fn().mockRejectedValue(new Error('offline'));
-    _setSpeakOverrides({ fetchImpl });
+    _setSpeakOverrides({ fetchImpl, forceElevenLabsEnabled: true });
 
     speak('PLAYBACK_NEXT', {
       liveRegion,
@@ -171,6 +213,7 @@ describe('speak() — fallback chain', () => {
 
   it('honors audioUrl override and only tries that URL before Web Speech', async () => {
     fetchImpl = vi.fn().mockRejectedValue(new Error('offline'));
+    // audioUrl honored regardless of ELEVENLABS_ENABLED — no flag override needed.
     _setSpeakOverrides({ fetchImpl });
 
     speak('RECORDING_POSTED', {
@@ -213,6 +256,7 @@ describe('speak() — fallback chain', () => {
     _setSpeakOverrides({
       fetchImpl,
       audioConstructor: FakeAudio as unknown as typeof HTMLAudioElement,
+      forceElevenLabsEnabled: true,
     });
 
     speak('RECORDING_POSTED', { liveRegion });
@@ -260,6 +304,7 @@ describe('speak() — fallback chain', () => {
     _setSpeakOverrides({
       fetchImpl,
       audioConstructor: FakeAudio as unknown as typeof HTMLAudioElement,
+      forceElevenLabsEnabled: true,
     });
 
     speak('RECORDING_POSTED', { liveRegion });
@@ -272,7 +317,7 @@ describe('speak() — fallback chain', () => {
 
   it('cancels prior Web Speech before new fallback', async () => {
     fetchImpl = vi.fn().mockRejectedValue(new Error('offline'));
-    _setSpeakOverrides({ fetchImpl });
+    _setSpeakOverrides({ fetchImpl, forceElevenLabsEnabled: true });
 
     speak('RECORDING_STARTED', { liveRegion });
     await flushChain();
