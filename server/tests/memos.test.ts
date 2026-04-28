@@ -214,3 +214,147 @@ describe('POST /api/memos', () => {
     expect(count?.count).toBe(0);
   });
 });
+
+interface MemoListResponse {
+  memos: Array<{
+    id: string;
+    user: { id: string; name: string };
+    audio_url: string;
+    mime_type: string;
+    duration_ms: number | null;
+    created_at: number;
+  }>;
+  next_cursor: string | null;
+}
+
+function seedMemos(db: DB, count: number, baseTime: number): void {
+  // Seeded with a stable created_at so tests are deterministic.
+  const stmt = db.prepare(
+    `INSERT INTO memos (id, user_id, audio_path, mime_type, duration_ms, created_at)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+  );
+  for (let i = 0; i < count; i++) {
+    stmt.run(
+      `m-${String(i).padStart(3, '0')}`,
+      DEMO_USER_ID,
+      `dummy-${i}.webm`,
+      'audio/webm',
+      null,
+      baseTime + i,
+    );
+  }
+}
+
+describe('GET /api/memos', () => {
+  let ctx: Awaited<ReturnType<typeof makeApp>>;
+
+  beforeEach(async () => {
+    ctx = await makeApp();
+  });
+
+  afterEach(async () => {
+    await ctx.app.close();
+    await rm(ctx.tmpDir, { recursive: true, force: true });
+  });
+
+  it('returns an empty list when no memos exist', async () => {
+    const response = await ctx.app.inject({ method: 'GET', url: '/api/memos' });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json<MemoListResponse>()).toEqual({
+      memos: [],
+      next_cursor: null,
+    });
+  });
+
+  it('returns memos newest-first with the user joined in', async () => {
+    seedMemos(ctx.db, 3, 1_000_000);
+
+    const response = await ctx.app.inject({ method: 'GET', url: '/api/memos' });
+    const body = response.json<MemoListResponse>();
+
+    expect(response.statusCode).toBe(200);
+    expect(body.memos).toHaveLength(3);
+    // Newest first → m-002, m-001, m-000.
+    expect(body.memos.map((m) => m.id)).toEqual(['m-002', 'm-001', 'm-000']);
+    expect(body.memos[0]).toMatchObject({
+      user: { id: DEMO_USER_ID, name: 'Demo' },
+      audio_url: '/api/memos/m-002/audio',
+      mime_type: 'audio/webm',
+      duration_ms: null,
+      created_at: 1_000_002,
+    });
+    expect(body.next_cursor).toBeNull();
+  });
+
+  it('honors a custom limit and returns a next_cursor when more remain', async () => {
+    seedMemos(ctx.db, 5, 1_000_000);
+
+    const response = await ctx.app.inject({
+      method: 'GET',
+      url: '/api/memos?limit=2',
+    });
+    const body = response.json<MemoListResponse>();
+
+    expect(response.statusCode).toBe(200);
+    expect(body.memos.map((m) => m.id)).toEqual(['m-004', 'm-003']);
+    expect(body.next_cursor).not.toBeNull();
+  });
+
+  it('paginates correctly across multiple pages with the cursor', async () => {
+    seedMemos(ctx.db, 5, 1_000_000);
+
+    const page1 = (
+      await ctx.app.inject({ method: 'GET', url: '/api/memos?limit=2' })
+    ).json<MemoListResponse>();
+
+    const page2 = (
+      await ctx.app.inject({
+        method: 'GET',
+        url: `/api/memos?limit=2&cursor=${encodeURIComponent(page1.next_cursor ?? '')}`,
+      })
+    ).json<MemoListResponse>();
+
+    const page3 = (
+      await ctx.app.inject({
+        method: 'GET',
+        url: `/api/memos?limit=2&cursor=${encodeURIComponent(page2.next_cursor ?? '')}`,
+      })
+    ).json<MemoListResponse>();
+
+    expect(page1.memos.map((m) => m.id)).toEqual(['m-004', 'm-003']);
+    expect(page2.memos.map((m) => m.id)).toEqual(['m-002', 'm-001']);
+    expect(page3.memos.map((m) => m.id)).toEqual(['m-000']);
+    expect(page3.next_cursor).toBeNull();
+  });
+
+  it('returns 400 on a malformed cursor', async () => {
+    const response = await ctx.app.inject({
+      method: 'GET',
+      url: '/api/memos?cursor=this-is-not-base64-or-anything',
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json<{ error: string }>().error).toBe('invalid_cursor');
+  });
+
+  it('rejects a non-positive limit', async () => {
+    const response = await ctx.app.inject({
+      method: 'GET',
+      url: '/api/memos?limit=0',
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json<{ error: string }>().error).toBe('invalid_query');
+  });
+
+  it('rejects a limit above the cap', async () => {
+    const response = await ctx.app.inject({
+      method: 'GET',
+      url: '/api/memos?limit=500',
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json<{ error: string }>().error).toBe('invalid_query');
+  });
+});
