@@ -64,7 +64,7 @@ describe('POST /api/llm', () => {
     expect(response.json<{ error: string }>().error).toBe('llm_disabled');
   });
 
-  it('returns the parsed LLM response on a successful call', async () => {
+  it('returns the dispatched response on a successful call', async () => {
     ctx = await makeCtx();
     ctx.complete.mockResolvedValueOnce({
       tool_calls: [
@@ -80,8 +80,14 @@ describe('POST /api/llm', () => {
     });
 
     expect(response.statusCode).toBe(200);
-    const body = response.json<{ tool_calls: Array<{ name: string }> }>();
-    expect(body.tool_calls.map((c) => c.name)).toEqual(['next_memo', 'speak']);
+    const body = response.json<{
+      speak_text: string;
+      client_actions: Array<{ name: string }>;
+      executed: Array<{ name: string }>;
+    }>();
+    expect(body.speak_text).toBe('Next memo.');
+    expect(body.client_actions.map((c) => c.name)).toEqual(['next_memo']);
+    expect(body.executed).toEqual([]);
   });
 
   it('passes the system prompt + transcript to the client', async () => {

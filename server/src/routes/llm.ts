@@ -25,6 +25,8 @@ import {
   LlmUpstreamError,
 } from '../llm/client.js';
 import { buildSystemPrompt } from '../llm/system-prompt.js';
+import { DispatchError, dispatchLlmResponse } from '../llm/dispatcher.js';
+import type { DB } from '../db/client.js';
 
 const TRANSCRIPT_MAX_LEN = 1_000;
 
@@ -47,6 +49,9 @@ export interface LlmRoutesOptions {
   /** null when LLM_BASE_URL is unset — proxy returns 503 in that case
    *  so the client falls to the deterministic parser. */
   client: LlmClient | null;
+  /** DB used by the dispatcher to validate memo_ids and execute
+   *  server-side tools (like_memo, unlike_memo). */
+  db: DB;
 }
 
 export const llmRoutes = (options: LlmRoutesOptions): FastifyPluginAsync =>
@@ -76,7 +81,26 @@ export const llmRoutes = (options: LlmRoutesOptions): FastifyPluginAsync =>
           systemPrompt,
           transcript,
         });
-        return reply.send(result);
+        // Server-side dispatch validates memo_ids and runs DB-only tools.
+        try {
+          const dispatched = dispatchLlmResponse(result, { db: options.db });
+          return reply.send(dispatched);
+        } catch (dispatchErr) {
+          if (dispatchErr instanceof DispatchError) {
+            request.log.warn(
+              { code: dispatchErr.code, msg: dispatchErr.message },
+              'llm dispatch error',
+            );
+            // Surface as 502 so the client falls back to the deterministic
+            // parser — same path as upstream errors.
+            return reply.code(502).send({
+              error: 'llm_dispatch_failed',
+              message: dispatchErr.message,
+              code: dispatchErr.code,
+            });
+          }
+          throw dispatchErr;
+        }
       } catch (err) {
         if (err instanceof LlmTimeoutError) {
           request.log.warn({ err: err.message }, 'llm timeout');

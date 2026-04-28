@@ -120,7 +120,7 @@ export async function buildServer(options: BuildOptions = {}): Promise<FastifyIn
       defaultVoice: process.env.ELEVENLABS_VOICE_ID?.trim(),
     }),
   );
-  await app.register(llmRoutes({ client: llmClient }));
+  await app.register(llmRoutes({ client: llmClient, db }));
 
   return app;
 }
