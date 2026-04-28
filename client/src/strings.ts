@@ -41,6 +41,9 @@ export const STRINGS = {
 
   // Comments (Phase 4)
   COMMENT_RECORDING: 'Go ahead. Press the button again to send your reply.',
+  COMMENT_POSTED: 'Replied.',
+  COMMENT_FAILED: "I couldn't send that reply. Try again.",
+  NO_MEMO_TO_REPLY_TO: "Nothing to reply to right now. Say next or record.",
 
   // Control
   CANCELLED: 'Cancelled.',
