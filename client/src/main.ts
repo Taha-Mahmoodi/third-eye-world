@@ -1,21 +1,31 @@
-// Phase 1 final wiring: record + post + auto-play feed loop, with spoken
-// feedback through the speak() pipeline.
+// Phase 2 final wiring: voice + keyboard reach feature parity.
 //
-// Phase 1 task 7 per INSTRUCTIONS.md § 9. The eyes-closed audit at the end
-// of Phase 1 is "can a sighted dev with eyes closed and VoiceOver on
-// record and hear back a memo?" — this file is what makes that yes.
+// Phase 2 closes the loop where every voice command works via keyboard too
+// (§ 2 #6, voice-grammar skill). Click on the record button still works;
+// voice ("record" / "post") still works; keyboard (R / Enter) still works.
+// All three paths funnel through dispatchCommand().
 //
 // Hard rules honored at this entry point (§ 2):
-// - #2 "One screen, one big button": index.html still has one <button> and
-//   one live region. Nothing else.
-// - #3 "Every state change is audible": every branch below calls speak().
-// - #4 "App is never silent after a user action": fetch/upload errors
-//   speak too. The catch arms are not optional.
-// - #10 "No spoken phrase inlined": every speak() arg is a strings.ts key.
+// - #2 "One screen, one big button": index.html still has one <button> + one
+//   live region. Nothing else.
+// - #3 "Every state change is audible": dispatchCommand() speaks on every
+//   action; queue + recorder events still speak from Phase 1.
+// - #4 "App is never silent after a user action": fetch / upload errors
+//   speak; UNKNOWN_COMMAND speaks on parser fallback.
+// - #5 "Every voice command is cancellable": STOP / Escape kills recorder +
+//   queue + comment-pending state.
+// - #6 "Keyboard-only operability": KeyboardCommandHandler covers all 11
+//   actions.
+// - #10 "No spoken phrase inlined": every speak() call passes a StringKey.
 
 import { AudioRecorder } from './audio/recorder.js';
 import { PlaybackQueue, type PlayableMemo } from './audio/playback-queue.js';
 import { speak } from './voice/speak.js';
+import { CommandListener } from './voice/recognition.js';
+import { CommandAction } from './commands/registry.js';
+import { parseCommand } from './commands/parser.js';
+import { dispatchCommand } from './commands/dispatcher.js';
+import { KeyboardCommandHandler } from './commands/keyboard.js';
 
 const RECORD_BUTTON_LABEL = {
   idle: 'Start recording a memo',
@@ -46,11 +56,7 @@ function isMemosListResponse(value: unknown): value is MemosListResponse {
 async function postMemo(blob: Blob): Promise<void> {
   const form = new FormData();
   form.append('audio', blob, 'memo');
-
-  const response = await fetch('/api/memos', {
-    method: 'POST',
-    body: form,
-  });
+  const response = await fetch('/api/memos', { method: 'POST', body: form });
   if (!response.ok) {
     throw new Error(`POST /api/memos failed: ${response.status}`);
   }
@@ -80,8 +86,16 @@ function init(): void {
   const button: HTMLButtonElement = buttonEl;
   const liveRegion: HTMLElement = liveRegionEl;
 
+  let isPlaybackActive = false;
+
   const queue = new PlaybackQueue({
-    onAllEnded: () => speak('PLAYBACK_ALL_DONE', { liveRegion }),
+    onMemoStart: () => {
+      isPlaybackActive = true;
+    },
+    onAllEnded: () => {
+      isPlaybackActive = false;
+      speak('PLAYBACK_ALL_DONE', { liveRegion });
+    },
     onError: () => speak('PLAYBACK_ERROR', { liveRegion }),
   });
 
@@ -90,26 +104,15 @@ function init(): void {
       speak('RECORDING_APPROACHING_LIMIT', { liveRegion }),
   });
 
-  let busy = false;
-
-  async function startRecording(): Promise<void> {
-    try {
-      await recorder.start();
-      button.setAttribute('aria-label', RECORD_BUTTON_LABEL.recording);
-      button.textContent = 'Stop & post';
-      speak('RECORDING_STARTED', { liveRegion });
-    } catch (err) {
-      const isPermissionError =
-        err instanceof Error &&
-        (err.name === 'NotAllowedError' || err.name === 'SecurityError');
-      speak(
-        isPermissionError ? 'RECORDING_PERMISSION_DENIED' : 'RECORDING_FAILED',
-        { liveRegion },
-      );
-    }
+  function setButtonState(state: 'idle' | 'recording'): void {
+    button.setAttribute('aria-label', RECORD_BUTTON_LABEL[state]);
+    button.textContent = state === 'recording' ? 'Stop & post' : 'Record';
   }
 
-  async function stopAndPost(): Promise<void> {
+  // The "post-memo flow" the dispatcher invokes on RECORD_STOP_POST. Owns
+  // its own user-facing speak() calls because only it knows whether the
+  // upload + fetch + queue.start sequence succeeded.
+  async function runPostFlow(): Promise<void> {
     try {
       const blob = await recorder.stop();
       await postMemo(blob);
@@ -126,19 +129,62 @@ function init(): void {
     } catch {
       speak('RECORDING_FAILED', { liveRegion });
     } finally {
-      button.setAttribute('aria-label', RECORD_BUTTON_LABEL.idle);
-      button.textContent = 'Record';
+      setButtonState('idle');
     }
   }
 
+  // The button-state side effects of RECORD_START aren't visible to the
+  // dispatcher itself (it just calls recorder.start). We attach a tiny
+  // proxy that flips the label after the recorder is actually started.
+  const dispatcherOptions = {
+    recorder,
+    queue,
+    liveRegion,
+    onPostMemo: runPostFlow,
+  };
+
+  async function dispatch(action: CommandAction | null): Promise<void> {
+    const wasRecording = recorder.isRecording();
+    await dispatchCommand(action, dispatcherOptions);
+    // Mirror state changes onto the button. The dispatcher is intentionally
+    // unaware of UI; this is the seam where it lands.
+    if (action === CommandAction.RECORD_START && !wasRecording && recorder.isRecording()) {
+      setButtonState('recording');
+    }
+    if (action === CommandAction.STOP && wasRecording) {
+      setButtonState('idle');
+    }
+  }
+
+  // Click on the button: depending on state, it's RECORD_START or RECORD_STOP_POST.
   button.addEventListener('click', () => {
-    if (busy) return;
-    busy = true;
-    const action = recorder.isRecording() ? stopAndPost() : startRecording();
-    void action.finally(() => {
-      busy = false;
-    });
+    void dispatch(
+      recorder.isRecording()
+        ? CommandAction.RECORD_STOP_POST
+        : CommandAction.RECORD_START,
+    );
   });
+
+  // Keyboard equivalents — covers all 11 actions per the voice-grammar skill.
+  const keyboard = new KeyboardCommandHandler(
+    (action) => void dispatch(action),
+    { isPlaying: () => isPlaybackActive },
+  );
+  keyboard.attach(document);
+
+  // Voice command listener — always-on. Errors degrade gracefully:
+  // mic-permission-denied speaks RECORDING_PERMISSION_DENIED and the user
+  // can still use the button + keyboard.
+  const listener = new CommandListener({
+    onResult: ({ transcript, isFinal }) => {
+      if (!isFinal) return;
+      void dispatch(parseCommand(transcript));
+    },
+    onError: ({ fatal }) => {
+      if (fatal) speak('RECORDING_PERMISSION_DENIED', { liveRegion });
+    },
+  });
+  listener.start();
 }
 
 if (document.readyState === 'loading') {
