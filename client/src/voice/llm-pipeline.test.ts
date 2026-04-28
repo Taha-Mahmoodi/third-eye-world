@@ -13,17 +13,17 @@ describe('routeViaLlm', () => {
         fetchImpl: vi.fn().mockRejectedValue(new Error('offline')),
       },
     );
-    expect(result).toBeNull();
+    expect(result.status).toBe('errored');
   });
 
-  it('returns null on 503 (LLM disabled — falls back)', async () => {
+  it('returns disabled on 503 (LLM not configured — no degraded message)', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ error: 'llm_disabled' }), {
         status: 503,
       }),
     );
     const result = await routeViaLlm('next', {}, { fetchImpl });
-    expect(result).toBeNull();
+    expect(result.status).toBe('disabled');
   });
 
   it('returns null on 504 (timeout — falls back)', async () => {
@@ -31,7 +31,7 @@ describe('routeViaLlm', () => {
       new Response(JSON.stringify({ error: 'llm_timeout' }), { status: 504 }),
     );
     const result = await routeViaLlm('next', {}, { fetchImpl });
-    expect(result).toBeNull();
+    expect(result.status).toBe('errored');
   });
 
   it('returns null on 502 (upstream / dispatch — falls back)', async () => {
@@ -39,7 +39,7 @@ describe('routeViaLlm', () => {
       new Response(JSON.stringify({ error: 'llm_upstream' }), { status: 502 }),
     );
     const result = await routeViaLlm('next', {}, { fetchImpl });
-    expect(result).toBeNull();
+    expect(result.status).toBe('errored');
   });
 
   it('translates client_actions tool names into CommandActions', async () => {
@@ -55,9 +55,12 @@ describe('routeViaLlm', () => {
     );
     const result = await routeViaLlm('next', {}, { fetchImpl });
     expect(result).toEqual({
-      speak_text: 'Next memo.',
-      actions: [CommandAction.NEXT_MEMO],
-      executed: [],
+      status: 'ok',
+      result: {
+        speak_text: 'Next memo.',
+        actions: [CommandAction.NEXT_MEMO],
+        executed: [],
+      },
     });
   });
 
@@ -73,7 +76,11 @@ describe('routeViaLlm', () => {
       ),
     );
     const result = await routeViaLlm('pause and help', {}, { fetchImpl });
-    expect(result?.actions).toEqual([CommandAction.PAUSE, CommandAction.HELP]);
+    if (result.status !== 'ok') throw new Error('expected ok');
+    expect(result.result.actions).toEqual([
+      CommandAction.PAUSE,
+      CommandAction.HELP,
+    ]);
   });
 
   it('exposes server-executed tools in result.executed', async () => {
@@ -88,8 +95,9 @@ describe('routeViaLlm', () => {
       ),
     );
     const result = await routeViaLlm('like this', {}, { fetchImpl });
-    expect(result?.executed).toEqual(['like_memo']);
-    expect(result?.actions).toEqual([]);
+    if (result.status !== 'ok') throw new Error('expected ok');
+    expect(result.result.executed).toEqual(['like_memo']);
+    expect(result.result.actions).toEqual([]);
   });
 
   it('drops unknown tool names silently', async () => {
@@ -104,7 +112,8 @@ describe('routeViaLlm', () => {
       ),
     );
     const result = await routeViaLlm('hi', {}, { fetchImpl });
-    expect(result?.actions).toEqual([CommandAction.PAUSE]);
+    if (result.status !== 'ok') throw new Error('expected ok');
+    expect(result.result.actions).toEqual([CommandAction.PAUSE]);
   });
 
   it('sends the context (current_memo) to /api/llm', async () => {
@@ -142,6 +151,6 @@ describe('routeViaLlm', () => {
       new Response(JSON.stringify({ wrong_shape: 1 }), { status: 200 }),
     );
     const result = await routeViaLlm('next', {}, { fetchImpl });
-    expect(result).toBeNull();
+    expect(result.status).toBe('errored');
   });
 });

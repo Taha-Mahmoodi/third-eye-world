@@ -277,19 +277,31 @@ function init(): void {
     const context = current
       ? { current_memo: { id: current.id, user_name: 'Demo' } }
       : {};
-    const llmResult = await routeViaLlm(transcript, context);
-    if (llmResult) {
+    const outcome = await routeViaLlm(transcript, context);
+    if (outcome.status === 'ok') {
       speak('UNKNOWN_COMMAND', {
         liveRegion,
-        textOverride: llmResult.speak_text,
+        textOverride: outcome.result.speak_text,
       });
-      for (const action of llmResult.actions) {
+      for (const action of outcome.result.actions) {
         await dispatch(action);
       }
       return;
     }
-    // LLM disabled / errored / timed out → deterministic parser.
-    await dispatch(parseCommand(transcript));
+    // LLM disabled or errored → try the deterministic Phase 2 parser.
+    const parsed = parseCommand(transcript);
+    if (parsed !== null) {
+      await dispatch(parsed);
+      return;
+    }
+    // Both failed. If the LLM was tried (errored, not just disabled),
+    // speak the contextual degraded message (§ 18). Otherwise the
+    // generic UNKNOWN_COMMAND.
+    if (outcome.status === 'errored') {
+      speak('DEGRADED_MODE', { liveRegion });
+    } else {
+      speak('UNKNOWN_COMMAND', { liveRegion });
+    }
   }
 
   // Voice command listener — always-on. Errors degrade gracefully:
