@@ -12,7 +12,7 @@ describe('schema.sql', () => {
     db.close();
   });
 
-  it('creates the users and memos tables', () => {
+  it('creates the users, memos, and likes tables', () => {
     const tables = db
       .prepare<unknown[], { name: string }>(
         "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
@@ -20,7 +20,7 @@ describe('schema.sql', () => {
       .all([])
       .map((row) => row.name);
 
-    expect(tables).toEqual(['memos', 'users']);
+    expect(tables).toEqual(['likes', 'memos', 'users']);
   });
 
   it('creates the expected indexes on memos', () => {

@@ -30,3 +30,17 @@ CREATE INDEX IF NOT EXISTS idx_memos_created_at ON memos(created_at DESC);
 
 -- For "memos by user X" lookups (likes/comments will join on user_id).
 CREATE INDEX IF NOT EXISTS idx_memos_user_id ON memos(user_id);
+
+-- Phase 4: likes. Composite primary key (user_id, memo_id) makes a "liked"
+-- relationship unique-by-design — no application-level UNIQUE check needed.
+CREATE TABLE IF NOT EXISTS likes (
+  user_id    TEXT NOT NULL,
+  memo_id    TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (user_id, memo_id),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (memo_id) REFERENCES memos(id) ON DELETE CASCADE
+);
+
+-- Counts the likes on a single memo: SELECT COUNT(*) FROM likes WHERE memo_id = ?
+CREATE INDEX IF NOT EXISTS idx_likes_memo_id ON likes(memo_id);
