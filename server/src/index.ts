@@ -1,5 +1,6 @@
 import { pathToFileURL } from 'node:url';
 import Fastify, { type FastifyInstance } from 'fastify';
+import cookie from '@fastify/cookie';
 import multipart from '@fastify/multipart';
 import rateLimit from '@fastify/rate-limit';
 import { openDatabase, type DB } from './db/client.js';
@@ -19,6 +20,8 @@ import { llmRoutes } from './routes/llm.js';
 import { createLlmClient, type LlmClient } from './llm/client.js';
 import { sttRoutes } from './routes/stt.js';
 import { createSttClient, type SttClient } from './lib/whisper.js';
+import { authRoutes } from './routes/auth.js';
+import type { SessionOptions } from './lib/session.js';
 
 const DEFAULT_TTS_CACHE_DIR = './cache/tts';
 
@@ -36,6 +39,8 @@ export interface BuildOptions {
   /** Pass null to force /api/stt to return 503 (test seam + the
    *  intended behavior when OPENAI_API_KEY is unset). */
   sttClient?: SttClient | null;
+  /** SESSION_SECRET override — tests pass a fixed value. */
+  sessionSecret?: string;
   /** Rate limit max per minute. Defaults to 60 per session in prod-like
    *  setups; tests can pass a high number to disable. */
   rateLimitPerMinute?: number;
@@ -105,6 +110,22 @@ export async function buildServer(options: BuildOptions = {}): Promise<FastifyIn
         ? createSttClient({ apiKey: process.env.OPENAI_API_KEY })
         : null;
 
+  // SESSION_SECRET: required for signed cookies. Tests pass an override;
+  // prod must set it via env. Falls back to a dev-only random value with
+  // a loud warning so local dev still works without surgery.
+  const sessionSecret =
+    options.sessionSecret ??
+    process.env.SESSION_SECRET?.trim() ??
+    (() => {
+      app.log.warn(
+        'SESSION_SECRET is not set; using a random per-process value. Sessions will not survive restarts.',
+      );
+      return Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('hex');
+    })();
+  const sessionOptions: SessionOptions = { secret: sessionSecret };
+
+  await app.register(cookie);
+
   await app.register(multipart, {
     limits: {
       fileSize: MAX_AUDIO_BYTES,
@@ -120,6 +141,10 @@ export async function buildServer(options: BuildOptions = {}): Promise<FastifyIn
   app.get('/health', () => {
     return { status: 'ok' };
   });
+
+  await app.register(
+    authRoutes({ db, sttClient, sessionOptions }),
+  );
 
   await app.register(memosRoutes({ db, audioStore }));
   await app.register(likesRoutes({ db }));
