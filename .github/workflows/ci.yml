@@ -1,0 +1,108 @@
+name: CI
+
+# Phase 0 skeleton — runs on every push and PR.
+#
+# At this stage the jobs are placeholders that succeed when the relevant
+# package.json / scripts do not exist yet. The structure is locked so that
+# later PRs (chore/server-skeleton, chore/client-skeleton) only need to add
+# their npm scripts — no workflow re-shaping required.
+#
+# Source of truth: INSTRUCTIONS.md § 9 Phase 0 task 2.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Run lint (skipped if no package.json yet)
+        run: |
+          if [ -f package.json ] && jq -e '.scripts.lint' package.json > /dev/null; then
+            npm ci
+            npm run lint
+          else
+            echo "No package.json or lint script yet — Phase 0 placeholder, skipping."
+          fi
+
+  typecheck:
+    name: Typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Run typecheck (skipped if no package.json yet)
+        run: |
+          if [ -f package.json ] && jq -e '.scripts.typecheck' package.json > /dev/null; then
+            npm ci
+            npm run typecheck
+          else
+            echo "No package.json or typecheck script yet — Phase 0 placeholder, skipping."
+          fi
+
+  test:
+    name: Unit + integration tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Run tests (skipped if no package.json yet)
+        run: |
+          if [ -f package.json ] && jq -e '.scripts.test' package.json > /dev/null; then
+            npm ci
+            npm run test
+          else
+            echo "No package.json or test script yet — Phase 0 placeholder, skipping."
+          fi
+
+  a11y:
+    name: Accessibility tests (axe-core)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Run a11y tests (skipped if no package.json yet)
+        run: |
+          if [ -f package.json ] && jq -e '.scripts["test:a11y"]' package.json > /dev/null; then
+            npm ci
+            npx playwright install --with-deps chromium
+            npm run test:a11y
+          else
+            echo "No package.json or test:a11y script yet — Phase 0 placeholder, skipping."
+          fi
+
+  e2e:
+    name: End-to-end tests (Playwright)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Run E2E tests (skipped if no package.json yet)
+        run: |
+          if [ -f package.json ] && jq -e '.scripts["test:e2e"]' package.json > /dev/null; then
+            npm ci
+            npx playwright install --with-deps chromium
+            npm run test:e2e
+          else
+            echo "No package.json or test:e2e script yet — Phase 0 placeholder, skipping."
+          fi
