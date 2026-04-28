@@ -18,6 +18,17 @@ out/
 server/uploads/
 uploads/
 
+# SQLite — runtime data, never committed
+data/
+server/data/
+*.db
+*.db-shm
+*.db-wal
+
+# TTS cache (server writes ElevenLabs MP3s here)
+cache/
+server/cache/
+
 # Test artifacts
 coverage/
 test-results/
