@@ -1,0 +1,41 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build output
+dist/
+build/
+out/
+.vite/
+
+# Environment & secrets
+.env
+.env.local
+.env.*.local
+*.pem
+
+# Audio uploads (demo storage)
+server/uploads/
+uploads/
+
+# Test artifacts
+coverage/
+test-results/
+playwright-report/
+playwright/.cache/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Local LLM caches (Ollama models live elsewhere; this is for any local dump)
+.ollama-cache/
