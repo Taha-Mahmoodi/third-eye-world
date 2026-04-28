@@ -44,3 +44,22 @@ CREATE TABLE IF NOT EXISTS likes (
 
 -- Counts the likes on a single memo: SELECT COUNT(*) FROM likes WHERE memo_id = ?
 CREATE INDEX IF NOT EXISTS idx_likes_memo_id ON likes(memo_id);
+
+-- Phase 4: comments. A comment is essentially a memo attached to a parent
+-- memo (same audio + mime + duration shape) with a memo_id FK.
+CREATE TABLE IF NOT EXISTS comments (
+  id           TEXT PRIMARY KEY,
+  memo_id      TEXT NOT NULL,
+  user_id      TEXT NOT NULL,
+  audio_path   TEXT NOT NULL,
+  mime_type    TEXT NOT NULL,
+  duration_ms  INTEGER,
+  created_at   INTEGER NOT NULL,
+  FOREIGN KEY (memo_id) REFERENCES memos(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- "Comments on memo X, oldest-first" is the playback order — replies are
+-- read out in the order they were posted.
+CREATE INDEX IF NOT EXISTS idx_comments_memo_created
+  ON comments(memo_id, created_at);
