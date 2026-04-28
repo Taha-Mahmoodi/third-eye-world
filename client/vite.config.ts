@@ -9,10 +9,18 @@ export default defineConfig({
   server: {
     port: 5173,
     strictPort: true,
+    // Forward /api/* to the Fastify server in dev so fetch('/api/memos')
+    // and fetch('/api/tts?text=...') work without CORS gymnastics.
+    proxy: {
+      '/api': 'http://localhost:3000',
+    },
   },
   preview: {
     port: 4173,
     strictPort: true,
+    proxy: {
+      '/api': 'http://localhost:3000',
+    },
   },
   build: {
     target: 'es2022',
